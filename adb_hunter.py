@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import base64
+import json
+import os
 import shutil
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def check_adb_connection(ip, port):
@@ -49,6 +54,63 @@ def check_live_shell(ip, port):
         pass
     return ip, False
 
+def fetch_shodan(query, limit):
+    """
+    Busca hosts no Shodan. Requer a variável de ambiente SHODAN_API_KEY.
+    Retorna uma lista de IPs (string).
+    """
+    key = os.environ.get("SHODAN_API_KEY")
+    if not key:
+        print("[!] SHODAN_API_KEY nao definido; pulando Shodan.")
+        return []
+    url = "https://api.shodan.io/shodan/host/search?" + urllib.parse.urlencode(
+        {"key": key, "query": query})
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            data = json.load(r)
+        ips = [m["ip_str"] for m in data.get("matches", []) if m.get("ip_str")]
+        ips = ips[:limit]
+        print(f"[i] Shodan: {len(ips)} hosts para '{query}'")
+        return ips
+    except Exception as e:
+        print(f"[!] Erro na consulta Shodan: {e}")
+        return []
+
+def fetch_censys(query, limit):
+    """
+    Busca hosts no Censys (API v2 Hosts). Requer CENSYS_API_ID e
+    CENSYS_API_SECRET. Retorna uma lista de IPs (string).
+    """
+    api_id = os.environ.get("CENSYS_API_ID")
+    secret = os.environ.get("CENSYS_API_SECRET")
+    if not (api_id and secret):
+        print("[!] CENSYS_API_ID/CENSYS_API_SECRET nao definidos; pulando Censys.")
+        return []
+    url = "https://search.censys.io/api/v2/hosts/search?" + urllib.parse.urlencode(
+        {"q": query, "per_page": min(limit, 100)})
+    auth = base64.b64encode(f"{api_id}:{secret}".encode()).decode()
+    req = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.load(r)
+        hits = data.get("result", {}).get("hits", [])
+        ips = [h["ip"] for h in hits if h.get("ip")]
+        ips = ips[:limit]
+        print(f"[i] Censys: {len(ips)} hosts para '{query}'")
+        return ips
+    except Exception as e:
+        print(f"[!] Erro na consulta Censys: {e}")
+        return []
+
+def load_from_file(path):
+    """Lê IPs de um arquivo (um por linha, '#' ignora a linha)."""
+    try:
+        with open(path, "r") as f:
+            return [line.strip() for line in f
+                    if line.strip() and not line.startswith("#")]
+    except FileNotFoundError:
+        sys.exit(f"[!] Arquivo {path} não encontrado.")
+
 def launch_scrcpy(targets):
     """
     Abre uma janela do scrcpy (sem áudio) para cada alvo confirmado.
@@ -68,7 +130,15 @@ def launch_scrcpy(targets):
 
 def main():
     ap = argparse.ArgumentParser(description="ADB Auto-Connect Hunter")
-    ap.add_argument("-f", "--file", required=True, help="Arquivo com IPs (um por linha)")
+    ap.add_argument("-f", "--file", help="Arquivo com IPs (um por linha)")
+    ap.add_argument("--shodan", metavar="QUERY",
+                    help="Buscar alvos no Shodan (ex: 'Android Debug Bridge port:5555'). "
+                         "Requer SHODAN_API_KEY no ambiente.")
+    ap.add_argument("--censys", metavar="QUERY",
+                    help="Buscar alvos no Censys (ex: 'services.port=5555 and "
+                         "services.service_name=ADB'). Requer CENSYS_API_ID e CENSYS_API_SECRET.")
+    ap.add_argument("--limit", type=int, default=100,
+                    help="Máximo de hosts por fonte de API (padrão 100)")
     ap.add_argument("-p", "--port", type=int, default=5555, help="Porta ADB (padrão 5555)")
     ap.add_argument("-w", "--workers", type=int, default=20, help="Threads paralelas")
     ap.add_argument("-o", "--output", help="Salvar IPs confirmados em arquivo")
@@ -78,11 +148,16 @@ def main():
                     help="Abrir scrcpy (--no-audio) para cada dispositivo confirmado")
     args = ap.parse_args()
 
-    try:
-        with open(args.file, "r") as f:
-            ips = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-    except FileNotFoundError:
-        sys.exit(f"[!] Arquivo {args.file} não encontrado.")
+    ips = []
+    if args.file:
+        ips += load_from_file(args.file)
+    if args.shodan:
+        ips += fetch_shodan(args.shodan, args.limit)
+    if args.censys:
+        ips += fetch_censys(args.censys, args.limit)
+
+    if not ips:
+        sys.exit("[!] Nenhuma fonte de IPs. Use -f, --shodan ou --censys.")
 
     ips = list(dict.fromkeys(ips))
     checker = check_live_shell if args.shell else check_adb_connection

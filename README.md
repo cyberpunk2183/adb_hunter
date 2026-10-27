@@ -12,7 +12,7 @@ Ferramenta em Python para testar conectividade ADB (Android Debug Bridge) em uma
 ## Uso
 
 ```bash
-python3 adb_hunterv2.py -f ips.txt [-p 5555] [-w 20] [-o resultados.txt]
+python3 adb_hunter.py -f ips.txt [-p 5555] [-w 20] [-o resultados.txt]
 ```
 
 | Flag | Descrição | Padrão |

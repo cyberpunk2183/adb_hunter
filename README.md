@@ -9,13 +9,12 @@ Ferramenta em Python para testar conectividade ADB (Android Debug Bridge) em uma
 - Python 3 (apenas stdlib — nenhum pacote extra)
 - `adb` instalado e disponível no PATH
 - `scrcpy` (opcional, apenas para a flag `--scrcpy`; requer display gráfico)
-- Chaves de API em variáveis de ambiente (apenas se usar `--shodan` / `--censys`)
 
 ## Uso
 
 ```bash
-python3 adb_hunter.py [-f ips.txt] [--shodan QUERY] [--censys QUERY] \
-    [-p 5555] [-w 20] [--limit 100] [-o resultados.txt] [-s] [--scrcpy]
+python3 adb_hunter.py [-f ips.txt] [--shodan API_KEY] [--censys ID:SECRET] \
+    [--query QUERY] [-p 5555] [-w 20] [--limit 100] [-o resultados.txt] [-s] [--scrcpy]
 ```
 
 É preciso informar pelo menos uma fonte de alvos: `-f`, `--shodan` ou `--censys`. Elas podem ser combinadas; os IPs são unidos e deduplicados antes do teste.
@@ -23,8 +22,9 @@ python3 adb_hunter.py [-f ips.txt] [--shodan QUERY] [--censys QUERY] \
 | Flag | Descrição | Padrão |
 |------|-----------|--------|
 | `-f, --file` | Arquivo com IPs (um por linha, `#` ignora a linha) | — |
-| `--shodan QUERY` | Busca alvos no Shodan (requer `SHODAN_API_KEY`) | — |
-| `--censys QUERY` | Busca alvos no Censys v2 (requer `CENSYS_API_ID` e `CENSYS_API_SECRET`) | — |
+| `--shodan API_KEY` | Busca alvos no Shodan usando esta API key | — |
+| `--censys ID:SECRET` | Busca alvos no Censys v2 usando `api_id:secret` | — |
+| `--query QUERY` | Sobrescreve a query padrão de ADB usada nas APIs | padrão embutido |
 | `--limit` | Máximo de hosts por fonte de API | 100 |
 | `-p, --port` | Porta ADB | 5555 |
 | `-w, --workers` | Threads paralelas | 20 |
@@ -32,15 +32,12 @@ python3 adb_hunter.py [-f ips.txt] [--shodan QUERY] [--censys QUERY] \
 | `-s, --shell` | Confirma apenas shells realmente vivos (descarta `error: closed`, `offline` e `unauthorized`) | desligado |
 | `--scrcpy` | Abre o `scrcpy` (`--no-audio`) para cada dispositivo confirmado | desligado |
 
-## Chaves de API
+A chave de API vai direto no comando. As queries padrão de busca são:
 
-As credenciais são lidas do ambiente (nunca ficam no código):
+- **Shodan:** `Android Debug Bridge port:5555`
+- **Censys:** `services.port=5555 and services.service_name=ADB`
 
-```bash
-export SHODAN_API_KEY="sua_chave"
-export CENSYS_API_ID="seu_id"
-export CENSYS_API_SECRET="seu_secret"
-```
+Use `--query` para trocar a busca.
 
 ## Modos de verificação
 
@@ -53,13 +50,15 @@ export CENSYS_API_SECRET="seu_secret"
 # De arquivo, só shells vivos, salvando o resultado
 python3 adb_hunter.py -f ips.txt -s -o vivos.txt
 
-# Buscando no Shodan e abrindo o scrcpy de cada confirmado
-python3 adb_hunter.py --shodan 'Android Debug Bridge port:5555' -s --scrcpy
+# Shodan: passa a API key e usa a query padrão de ADB; abre o scrcpy
+python3 adb_hunter.py --shodan SUA_KEY -s --scrcpy
 
-# Censys v2, limitando a 50 hosts
-python3 adb_hunter.py --censys 'services.port=5555 and services.service_name=ADB' --limit 50 -s
+# Censys: credenciais no formato id:secret
+python3 adb_hunter.py --censys SEU_ID:SEU_SECRET -s
+
+# Trocando a query da busca
+python3 adb_hunter.py --shodan SUA_KEY --query 'port:5555 product:"Android Debug Bridge"' -s
 
 # Combinando arquivo + Shodan + Censys
-python3 adb_hunter.py -f ips.txt --shodan 'port:5555 product:"Android Debug Bridge"' \
-    --censys 'services.service_name=ADB' -s -o vivos.txt
+python3 adb_hunter.py -f ips.txt --shodan SUA_KEY --censys SEU_ID:SEU_SECRET -s -o vivos.txt
 ```

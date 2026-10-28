@@ -1,4 +1,12 @@
-# adb_hunter
+<p align="center">
+  <img src="brasil.gif" alt="Bandeira do Brasil" width="640">
+</p>
+
+<p align="center">
+  🇧🇷 <strong>Feito com orgulho por brasileiros</strong> 🇧🇷
+</p>
+
+# adb_hunter 🇧🇷
 
 Ferramenta em Python para testar conectividade ADB (Android Debug Bridge) em uma lista de alvos — de arquivo local ou buscados via API do **Shodan** / **Censys** — usando o binário `adb` do sistema e threads paralelas.
 
